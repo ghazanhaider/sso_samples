@@ -25,13 +25,16 @@ oauth.register(
     name='google',
     client_id=os.environ.get('GOOGLE_CLIENT_ID'),
     client_secret=os.environ.get('GOOGLE_CLIENT_SECRET'),
-    authorize_url="https://accounts.google.com/o/oauth2/auth",
-    authorize_params={"scope": "openid email profile"},
-    access_token_url="https://oauth2.googleapis.com/token",
+    #authorize_url="https://accounts.google.com/o/oauth2/auth",
+    #authorize_params={"scope": "openid email profile"},
+    #access_token_url="https://oauth2.googleapis.com/token",
     client_kwargs={"scope": "openid email profile",
-                   "verify": ssl_context},
+                   "verify": ssl_context,
+                   'prompt': 'select_account',                  # force to select account
+                   "code_challenge_method": 'S256' },           # Adding PKCE on top of Auth Code Flow
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration"
     )
+
 
 # Goes to Google Auth api
 @app.get('/login')
@@ -56,7 +59,7 @@ async def auth_callback(request: Request):
 async def homepage(request: Request):
     user = request.session.get('user')
     if user:
-        return f"Hello, {user['name']} ({user['email']})! <a href='/logout'>Logout</a><img src=\"{user['picture']}\"><pre class=\"raw-text\">{user}</pre>"
+        return f"Hello, {user['name']} ({user['email']})! <pre class=\"raw-text\" style=\"white-space: pre-wrap;\">{user}</pre> <a href='/logout'>Logout</a>"
     return f"Welcome! <a href='/login'>Login with Google</a>"
 
 # Removes user from Flask session

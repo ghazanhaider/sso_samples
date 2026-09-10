@@ -1,12 +1,24 @@
 # SSO samples
 
-Concepts:
+## Concepts
 
 IDp is the ID 'provider'
+- It has an `authorize` endpoint and a `token` endpoint
+- If it supports OIDC, it has an OIDC discovery endpoint `/.well-known/openid-configuration` (static data)
 
-Application: Created against the IDp, gives back a client_id and either client_secret or a certificate
-- Single-Page apps do Auth in client javascript/Angular/Node
-- Regular Apps do Auth in the backend (Flask etc)
+WebApp is the Flask/FastAPI app the user is interacting with running in the backend (not SPA/javascript)
+
+Resource is the resource that needs auth to access and will serve data given an `access_token`
+
+User is the user interacting with (but not fully trusting) a WebApp, providing consent (or not)
+
+Browser: manages session and tracks consent (bypasses consent if not needed)
+
+
+WebApp is the Flask/FastAPI app the user is interacting with in a browser
+- Running in the backend (not SPA/javascript)
+- Login button specific to the IDp
+- (Single-Page apps do Auth in client javascript/Angular/Node)
 - Apps can be first-party (mine, or owned by the same client), or third-party (external party accessing my data)
 - Third party:
   - Requires explicit client_grant
@@ -21,10 +33,18 @@ Refs:
 https://auth0.com/docs/get-started/applications/confidential-and-public-applications
 
 
-Code Flow:
+The `client_id` and `client_secret` or X.509 cert is specific to the App (Webapp) registered against the IDp and not specific to the user.
+The user has their own account within the IDp
+
+
+## Code Flows
 Authorization Code Flow, Resource Owner Password Flow: Used in Confidential Web Apps
 Client Credentials Flow: M2M Confidential App
-Authorization Code Flow with PKCE: Public App,
+Authorization Code Flow with PKCE: Public App
+OAuth mTLS: X.509 digital certificate (RFC 8705) in place of client_secret
+            The `Resource` is given the `access_token` which is bound to the client.
+            It includes the cert thumbrint for the Resource to check
+
 Implicit Flow: Public App, single-page using client javascipt. Insecure, returns tokens direct from `/authorize`
 
 OIDC:
@@ -47,7 +67,7 @@ Scopes:
 ## Authorization Code Flow
 
 1. User: click login -> Webapp
-2. Webapp: Auth code request -> IDp `/authorize` (done without loginid or client_id in case session already exists)
+2. Webapp: Redirects User to IDp `/authorize` with a payload including `client_id` and `redirect_uri`
 3. IDp: Redirect login/auth prompt -> User (Empty prompt | User's login and picture | MFA | Or skipped if already logged in)
 4. User: Auth and consent -> IDp
 5. IDp: Authorization Code -> Webapp `redirect_uri` with `code` (Single-use authorization code)
@@ -59,6 +79,55 @@ Scopes:
 - `access_token` and `id_token` and optional `refresh_token`
 9. Webapp: Request user_data with access token -> IDp
 10. IDp: User data -> Webapp
+
+
+## Auth Code Flow Options
+
+PKCE (Code Challenge RFC7636):
+- WebApp adds `code_verifier` (random string) and `code_challenge` (sha256 hash of this string)
+- The `code_challenge` is sent to the `/authorize` endpoint
+- The `code_verifier` is sent to the `/token` endpoint
+- IDp compares this `code_verifier` with the previous `code_challenge` before serving the `access_token`
+- Used for Single-Web-Page apps and apps that cannot have the `client_secret`
+- However OAuth 2.1 recommends using `code_verifier` and `code_challenge` in addition to `client_secret` for "Confidential Clients" as well (WebApps)
+
+Entra Certs private_key_jwt (RFC7523):
+- All providers support this (openid config "token_endpoint_auth_methods_supported" includes `private_key_jwt`)
+- Add `token_endpoint_auth_method="private_key_jwt"` and remove `client_secret` from OAuth dict
+- Algorithm options are either `RS256` or `ES256`
+- `from authlib.oauth2.rfc7523 import PrivateKeyJWT`
+- WebApp exposes a JWKS endpoint for IDp with a public key
+- Entra: Does not check public chains, only compares the public/private sides
+- On each run:
+    - WebApp creates a JWT with claims and signs it with the private key
+    - WebApp sents the JWT in place of client_secret
+    - The JWT `aud` claim should be the `/token` endpoint url
+    - The JWT expiry (`exp` claim) should be 5 min or shorter
+    - IDp fetches public key for validation from the JWKS public endpoint
+
+
+client_secret_jwt (RFC7523):
+- `from authlib.oauth2.rfc7523 import ClientSecretJWT`
+
+Mutual-TLS (RFC8705):
+- nginx translates the incoming client certificate to a header to FastAPI: `X-Client-Cert-SHA256`
+
+
+PAR (RFC9126):
+- The WebApp accesses the IDp behind the scene and shares some user session info
+- The IDp returns a temporary endpoint for `/authorize` for the user
+- The WebApp uses this temp endpoint to send user to IDp for consent
+- Only Auth0 IDp provides this
+
+
+Validating IDp X.509 certificates:
+- WebApp fetches IDp's public key from `x5c` parameter in a JWKS, or OIDC endpoint
+- It decodes the incoming JWT and compares it with the public key
+
+Base Oauth2 (RFC6749) built-in grants:
+
+JWT:
+
 
 
 Webapp Endpoints:
@@ -165,6 +234,14 @@ client_id=11112222-bbbb-3333-cccc-4444dddd5555
     'ver': '2.0'
 }
 ```
+
+
+
+Entra use of `private_key_jwt` Certificate instead of `client_secret`:
+
+Generate a self-signed certificate
+
+`openssl req -x509 -newkey rsa:2048 -keyout private.pem -out certificate.pem -days 365 -nodes -subj "/CN=FastApiClient"`
 
 
 ## Google

@@ -11,6 +11,8 @@ python3 flask_app.py
 
 fastapi_app.py
 ```
+uv init --no-package
+uv add 'fastapi[standard]'
 uv add fastapi authlib itsdangerous
 uv run fastapi dev fastapi_app.py --port 5000
 ```
